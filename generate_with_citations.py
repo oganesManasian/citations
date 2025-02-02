@@ -117,7 +117,14 @@ def get_attended_tokens(pattern_store: dict, fusion_approach: Literal["mode", "m
     return fused_res
 
 
-def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[int], generated_token_attention_res: list[int]) -> str:
+def build_citation_str(
+        model, 
+        prompt_tokens: list[int], 
+        generated_tokens: list[int], 
+        generated_token_attention_res: list[int],
+        # This can backfire in case of specific facts, i.e. which occupy a single token.
+        minimal_token_count_in_citation: int = 3
+    ) -> str:
     generated_text_with_citations = []
     last_attented_token_ind = -100
     current_citation = []
@@ -125,10 +132,11 @@ def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[i
 
     def save_citation_and_restart():
         nonlocal current_citation, complete_citations, generated_text_with_citations
-        complete_citations.append(current_citation)
-        citation_ind = len(complete_citations)
-        citation_refer_tokens = model.to_tokens(f"[{citation_ind}]", prepend_bos=False).cpu().squeeze().numpy().tolist()
-        generated_text_with_citations.extend(citation_refer_tokens)
+        if len(current_citation) >= minimal_token_count_in_citation:
+            complete_citations.append(current_citation)
+            citation_ind = len(complete_citations)
+            citation_refer_tokens = model.to_tokens(f"[{citation_ind}]", prepend_bos=False).cpu().squeeze().numpy().tolist()
+            generated_text_with_citations.extend(citation_refer_tokens)
         current_citation = []
 
     for token, attended_token_ind in zip(generated_tokens, generated_token_attention_res):
@@ -153,8 +161,10 @@ def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[i
 
     generated_text_with_citations_str = model.to_string(generated_text_with_citations)
     citation_texts = "\n\n"
-    for i, citation in enumerate(complete_citations):
-        citation_texts += f"[{i+1}]: {model.to_string(citation)}\n"
+    for i, citation_tokens in enumerate(complete_citations):
+        citation_str = model.to_string(citation_tokens)
+        citation_str = citation_str.strip()
+        citation_texts += f"[{i+1}]: {citation_str}\n"
     generated_text_with_citations_str += citation_texts
 
     return generated_text_with_citations_str
