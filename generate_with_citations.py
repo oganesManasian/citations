@@ -163,15 +163,10 @@ def generate_with_citations(model, prompt: str, induction_layer_to_head_map, see
     prompt_tokens = model.to_tokens(prompt)[0].cpu().numpy()
     prompt_token_count = len(prompt_tokens)
     generated_token_attention_res = token_attention_res[prompt_token_count:]
-    
-    generated_text = output.replace(prompt, "")
-    generated_tokens = model.to_tokens(generated_text, prepend_bos=False).squeeze().cpu().numpy()
+    generated_tokens = input_tensor.squeeze().cpu().numpy()[prompt_token_count:]
     assert len(generated_tokens) == len(generated_token_attention_res)
 
-    generated_tokens = [int(v) for v in generated_tokens]
-    prompt_tokens = [int(v) for v in prompt_tokens]
-    generated_token_attention_res = [int(v) for v in generated_token_attention_res]
-    postprocess_generated_text_with_citations(generated_token_attention_res)
+    generated_tokens, prompt_tokens,  generated_token_attention_res = ([int(val) for val in arr] for arr in (generated_tokens, prompt_tokens, generated_token_attention_res))
     generated_text_with_citations_str = build_citation_str(model, prompt_tokens, generated_tokens, generated_token_attention_res)
 
     return generated_text_with_citations_str
