@@ -1,4 +1,5 @@
 from pathlib import Path
+from IPython.display import display
 import pandas as pd
 import torch
 import einops
@@ -13,6 +14,7 @@ from transformer_lens import HookedTransformer
 from collections import defaultdict
 import numpy as np
 from scipy.stats import mode
+import circuitsvis as cv
 
 from data_utils import load_prompts_from_msmarco_samples_from_rag_truth
 
@@ -76,6 +78,13 @@ def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_
             p = pattern[0, head_ind, :, :].detach().cpu().numpy()
             pattern_store[f"layer_{layer_ind}_head_{head_ind}"] = p
 
+            if visualise:
+                display(
+                    cv.attention.attention_patterns(
+                        tokens=model.to_str_tokens(input, ), 
+                        attention=pattern[0, head_ind, :, :].detach().cpu().numpy()[None, :, :] # Add a dummy axis, as CircuitsVis expects 3D patterns.
+                    )
+                )
     model.run_with_hooks(
         input, 
         return_type=None, 
