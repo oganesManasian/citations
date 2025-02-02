@@ -19,7 +19,7 @@ import circuitsvis as cv
 from data_utils import load_prompts_from_msmarco_samples_from_rag_truth
 
 
-def identify_copying_heads(model: HookedTransformer):
+def identify_copying_heads(model: HookedTransformer, min_score: float = 0.6) -> dict[int, list[int]]:
     batch_size = 10
     seq_len = 50
     size = (batch_size, seq_len)
@@ -54,8 +54,6 @@ def identify_copying_heads(model: HookedTransformer):
         )]
     )
 
-    min_score = 0.6 # Manually inspected
-    top_k = 5 # TODO
     layer_inds, head_inds = np.where(induction_score_store.cpu().numpy() > min_score)
 
     induction_layer_to_head_map = defaultdict(list)
@@ -65,7 +63,7 @@ def identify_copying_heads(model: HookedTransformer):
     return induction_layer_to_head_map
 
 
-def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_head_map, visualise: bool = False) -> dict[str, np.ndarray]:
+def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_head_map: dict[int, list[int]], visualise: bool = False) -> dict[str, np.ndarray]:
     model.reset_hooks()
 
     pattern_store = {}
@@ -80,7 +78,7 @@ def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_
 
             if visualise:
                 display(
-                    cv.attention.attention_patterns(
+                    cv.attention.attention_patterns( # type: ignore
                         tokens=model.to_str_tokens(input, ), 
                         attention=pattern[0, head_ind, :, :].detach().cpu().numpy()[None, :, :] # Add a dummy axis, as CircuitsVis expects 3D patterns.
                     )
@@ -112,7 +110,7 @@ def get_token_attention(pattern_store: dict) -> np.ndarray:
     return token_attention
 
 
-def build_citation_str(model, prompt_tokens, generated_tokens, generated_token_attention_res):
+def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[int], generated_token_attention_res: list[int]) -> str:
     generated_text_with_citations = []
     last_attented_token_ind = -100
     current_citation = []
@@ -156,13 +154,14 @@ def build_citation_str(model, prompt_tokens, generated_tokens, generated_token_a
 
 
 # TODO there is a more generic name (mean filter?)
-def postprocess_generated_text_with_citations(arr: list[int]):
+def _postprocess_generated_text_with_citations(arr: list[int]):
     # [..., 123, 124, 0, 126, 127, ...] -> [..., 123, 124, 125, 126, 127, ...]
     for i in range(1, len(arr) - 1):
         if arr[i] == 0 and arr[i+1] - arr[i-1] == 2:
                 arr[i] = arr[i-1] + 1
 
-def generate_with_citations(model, prompt: str, induction_layer_to_head_map, seed: int = 7575):
+
+def generate_with_citations(model, prompt: str, induction_layer_to_head_map: dict[int, list[]], seed: int = 7575) -> str:
     torch.manual_seed(seed)
     output = model.generate(prompt, max_new_tokens=256, temperature=1, do_sample=True)
 
@@ -177,6 +176,7 @@ def generate_with_citations(model, prompt: str, induction_layer_to_head_map, see
     assert len(generated_tokens) == len(generated_token_attention_res)
 
     generated_tokens, prompt_tokens,  generated_token_attention_res = ([int(val) for val in arr] for arr in (generated_tokens, prompt_tokens, generated_token_attention_res))
+    _postprocess_generated_text_with_citations(generated_token_attention_res)
     generated_text_with_citations_str = build_citation_str(model, prompt_tokens, generated_tokens, generated_token_attention_res)
 
     return generated_text_with_citations_str
