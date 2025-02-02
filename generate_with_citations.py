@@ -217,9 +217,7 @@ def main():
     dataset_path = Path(__file__).parent / "RAGTruth-main/dataset/"
     prompts = load_prompts_from_msmarco_samples_from_rag_truth(dataset_path)
 
-    np.random.seed(7575)
-    prompts_inds = np.random.choice(len(prompts), 20, replace=False)
-    prompts_inds = [1]
+    prompts_inds = [1, 244]
 
     results = []
     for prompt_ind in tqdm(prompts_inds):
