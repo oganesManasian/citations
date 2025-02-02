@@ -97,15 +97,16 @@ def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_
     return pattern_store
 
 
+AttnPatternFusionOptions = Literal["mode", "mode_without_zeros", "best_scoring_head", "most_attending_head"]
 
-def get_attended_tokens(pattern_store: dict, fusion_approach: Literal["mode", "mode_without_zeros"] = "mode") -> np.ndarray:
+def get_attended_tokens(pattern_store: dict, fusion_approach: AttnPatternFusionOptions = "most_attending_head") -> np.ndarray:
     seq_len = next(iter(pattern_store.values())).shape[0]
 
     max_token_attention = np.zeros((len(pattern_store), seq_len), dtype=int)
 
     for i, pattern in enumerate(pattern_store.values()):
         max_token_attention[i] = pattern.argmax(axis=1)
-
+    
     if fusion_approach == "mode":
         fused_res = mode(max_token_attention, axis=0).mode
     elif fusion_approach == "mode_without_zeros":
@@ -113,6 +114,13 @@ def get_attended_tokens(pattern_store: dict, fusion_approach: Literal["mode", "m
         token_attentions = max_token_attention.astype(np.float32)
         token_attentions[token_attentions == 0] = np.nan
         fused_res = mode(token_attentions, axis=0, nan_policy="omit").mode
+        fused_res[np.isnan(fused_res)] = 0
+    elif fusion_approach == "best_scoring_head":
+        fused_res = max_token_attention[5, :]
+    elif fusion_approach == "most_attending_head":
+        most_attended_head_ind = np.argmax((max_token_attention != 0).sum(axis=1))
+        fused_res = max_token_attention[most_attended_head_ind, :]
+
 
     return fused_res
 
