@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 from IPython.display import display
 import pandas as pd
 import torch
@@ -97,7 +98,7 @@ def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_
 
 
 
-def get_token_attention(pattern_store: dict) -> np.ndarray:
+def get_attended_tokens(pattern_store: dict, fusion_approach: Literal["mode", "mode_without_zeros"] = "mode") -> np.ndarray:
     seq_len = next(iter(pattern_store.values())).shape[0]
 
     max_token_attention = np.zeros((len(pattern_store), seq_len), dtype=int)
@@ -105,9 +106,15 @@ def get_token_attention(pattern_store: dict) -> np.ndarray:
     for i, pattern in enumerate(pattern_store.values()):
         max_token_attention[i] = pattern.argmax(axis=1)
 
-    token_attention = mode(max_token_attention, axis=0).mode # Voting TODO this is not working since most of the copying heads are looking at 0.
+    if fusion_approach == "mode":
+        fused_res = mode(max_token_attention, axis=0).mode
+    elif fusion_approach == "mode_without_zeros":
+        # we can't set np.nan to interger array
+        token_attentions = max_token_attention.astype(np.float32)
+        token_attentions[token_attentions == 0] = np.nan
+        fused_res = mode(token_attentions, axis=0, nan_policy="omit").mode
 
-    return token_attention
+    return fused_res
 
 
 def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[int], generated_token_attention_res: list[int]) -> str:
@@ -153,33 +160,33 @@ def build_citation_str(model, prompt_tokens: list[int], generated_tokens: list[i
     return generated_text_with_citations_str
 
 
-# TODO there is a more generic name (mean filter?)
-def _postprocess_generated_text_with_citations(arr: list[int]):
+def _median_filter_1d_array(arr: list[int]):
     # [..., 123, 124, 0, 126, 127, ...] -> [..., 123, 124, 125, 126, 127, ...]
     for i in range(1, len(arr) - 1):
         if arr[i] == 0 and arr[i+1] - arr[i-1] == 2:
                 arr[i] = arr[i-1] + 1
 
 
-def generate_with_citations(model, prompt: str, induction_layer_to_head_map: dict[int, list[]], seed: int = 7575) -> str:
+def generate_with_citations(model, prompt: str, induction_layer_to_head_map: dict[int, list[int]], seed: int = 7575) -> str:
     torch.manual_seed(seed)
-    output = model.generate(prompt, max_new_tokens=256, temperature=1, do_sample=True)
+    prompt_plus_generated = model.generate(prompt, max_new_tokens=256, temperature=1, do_sample=True)
 
-    input_tensor = model.to_tokens(output).to(model.cfg.device)
-    pattern_store_res = get_model_attention_patterns(model, input_tensor, induction_layer_to_head_map)
-    token_attention_res = get_token_attention(pattern_store_res)
+    prompt_plus_generated_tensor = model.to_tokens(prompt_plus_generated).to(model.cfg.device)
+    pattern_store = get_model_attention_patterns(model, prompt_plus_generated_tensor, induction_layer_to_head_map)
+    attended_tokens = get_attended_tokens(pattern_store)
 
     prompt_tokens = model.to_tokens(prompt)[0].cpu().numpy()
     prompt_token_count = len(prompt_tokens)
-    generated_token_attention_res = token_attention_res[prompt_token_count:]
-    generated_tokens = input_tensor.squeeze().cpu().numpy()[prompt_token_count:]
-    assert len(generated_tokens) == len(generated_token_attention_res)
+    generated_tokens = prompt_plus_generated_tensor.squeeze().cpu().numpy()[prompt_token_count:]
+    generated_tokens_attendance = attended_tokens[prompt_token_count:]
+    assert len(generated_tokens) == len(generated_tokens_attendance)
 
-    generated_tokens, prompt_tokens,  generated_token_attention_res = ([int(val) for val in arr] for arr in (generated_tokens, prompt_tokens, generated_token_attention_res))
-    _postprocess_generated_text_with_citations(generated_token_attention_res)
-    generated_text_with_citations_str = build_citation_str(model, prompt_tokens, generated_tokens, generated_token_attention_res)
+    # for easier processing
+    generated_tokens, prompt_tokens,  generated_tokens_attendance = ([int(val) for val in arr] for arr in (generated_tokens, prompt_tokens, generated_tokens_attendance))
+    _median_filter_1d_array(generated_tokens_attendance)
+    generated_text_with_citations = build_citation_str(model, prompt_tokens, generated_tokens, generated_tokens_attendance)
 
-    return generated_text_with_citations_str
+    return generated_text_with_citations
 
 
 def main():
@@ -194,6 +201,7 @@ def main():
 
     np.random.seed(7575)
     prompts_inds = np.random.choice(len(prompts), 20, replace=False)
+    prompts_inds = [1]
 
     results = []
     for prompt_ind in tqdm(prompts_inds):
