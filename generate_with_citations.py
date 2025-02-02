@@ -107,21 +107,32 @@ def build_citation_str(model, prompt_tokens, generated_tokens, generated_token_a
     last_attented_token_ind = -100
     current_citation = []
     complete_citations = []
+
+    def save_citation_and_restart():
+        nonlocal current_citation, complete_citations, generated_text_with_citations
+        complete_citations.append(current_citation)
+        citation_ind = len(complete_citations)
+        citation_refer_tokens = model.to_tokens(f"[{citation_ind}]", prepend_bos=False).cpu().squeeze().numpy().tolist()
+        generated_text_with_citations.extend(citation_refer_tokens)
+        current_citation = []
+
     for token, attended_token_ind in zip(generated_tokens, generated_token_attention_res):
         generated_text_with_citations.append(token)
 
-        if attended_token_ind - last_attented_token_ind in list(range(1, 5)):
-            current_citation.append(prompt_tokens[attended_token_ind])
-        else:
-            if len(current_citation) > 0:
-                complete_citations.append(current_citation)
-                citation_ind = len(complete_citations)
-                citation_refer_tokens = model.to_tokens(f"[{citation_ind}]", prepend_bos=False).cpu().squeeze().numpy().tolist()
-                generated_text_with_citations.extend(citation_refer_tokens)
-                current_citation = []
+        allowed_citation = attended_token_ind != 0 and attended_token_ind < len(prompt_tokens)
+        continue_citation = allowed_citation and attended_token_ind - last_attented_token_ind in list(range(1, 5))
+        citation_in_progress = len(current_citation) > 0
 
-            if attended_token_ind != 0:
+        if allowed_citation:
+            if citation_in_progress and continue_citation:
+                current_citation.append(prompt_tokens[attended_token_ind])
+            elif citation_in_progress and not continue_citation:
+                save_citation_and_restart()
+            else:
                 current_citation = [prompt_tokens[attended_token_ind]]
+        else:
+            if citation_in_progress:
+                save_citation_and_restart()
 
         last_attented_token_ind = attended_token_ind
 
