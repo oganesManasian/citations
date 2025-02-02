@@ -1,19 +1,20 @@
 from pathlib import Path
+import pandas as pd
 import torch
 import einops
 
 from jaxtyping import Float
+from tqdm import tqdm
 import transformer_lens.utils as utils
 from transformer_lens.hook_points import (
     HookPoint,
 )
 from transformer_lens import HookedTransformer
-import circuitsvis as cv
 from collections import defaultdict
 import numpy as np
+from scipy.stats import mode
 
 from data_utils import load_prompts_from_msmarco_samples_from_rag_truth
-from scipy.stats import mode
 
 
 def identify_copying_heads(model: HookedTransformer):
@@ -182,11 +183,20 @@ def main():
     dataset_path = Path(__file__).parent / "RAGTruth-main/dataset/"
     prompts = load_prompts_from_msmarco_samples_from_rag_truth(dataset_path)
 
-    prompt = prompts[1]
-    generation_with_citations = generate_with_citations(model, prompt, induction_layer_to_head_map)
-    print(prompt)
-    print("ANSWER:")
-    print(generation_with_citations)
+    np.random.seed(7575)
+    prompts_inds = np.random.choice(len(prompts), 20, replace=False)
+
+    results = []
+    for prompt_ind in tqdm(prompts_inds):
+        prompt = prompts[prompt_ind]
+        generation_with_citations = generate_with_citations(model, prompt, induction_layer_to_head_map)
+        print(f"prompt_ind: {prompt_ind}\nPROMPT:\n{prompt}\nANSWER:\n{generation_with_citations}\n\n")
+        results.append({
+            "prompt_ind": prompt_ind,
+            "prompt": prompt,
+            "generation": generation_with_citations
+        })
+    pd.DataFrame(results).to_csv("results.csv", index=False)
 
 
 if __name__ == "__main__":
