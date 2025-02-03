@@ -97,7 +97,7 @@ def get_model_attention_patterns(model, input: torch.Tensor, induction_layer_to_
     return pattern_store
 
 
-AttnPatternFusionOptions = Literal["mode", "mode_without_zeros", "best_scoring_head", "most_attending_head"]
+AttnPatternFusionOptions = Literal["majority_vote", "majority_vote_without_zeros", "best_scoring_head", "most_attending_head"]
 
 def get_attended_tokens(pattern_store: dict, fusion_approach: AttnPatternFusionOptions = "most_attending_head") -> np.ndarray:
     seq_len = next(iter(pattern_store.values())).shape[0]
@@ -107,9 +107,9 @@ def get_attended_tokens(pattern_store: dict, fusion_approach: AttnPatternFusionO
     for i, pattern in enumerate(pattern_store.values()):
         max_token_attention[i] = pattern.argmax(axis=1)
     
-    if fusion_approach == "mode":
+    if fusion_approach == "majority_vote":
         fused_res = mode(max_token_attention, axis=0).mode
-    elif fusion_approach == "mode_without_zeros":
+    elif fusion_approach == "majority_vote_without_zeros":
         # we can't set np.nan to interger array
         token_attentions = max_token_attention.astype(np.float32)
         token_attentions[token_attentions == 0] = np.nan
